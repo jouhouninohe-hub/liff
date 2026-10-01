@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>配信設定｜二戸市公式LINE</title>
+<style>
+:root{--g:#06c755;--ink:#1f2933;--sub:#66737c;--line:#e3e8e6;--bg:#f4f6f5}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,"Hiragino Sans","Noto Sans JP",Meiryo,sans-serif;padding-bottom:calc(130px + env(safe-area-inset-bottom))}
+header{padding:20px 16px 4px}
+h1{font-size:20px;margin:0 0 6px}
+header p,.note{margin:0;font-size:14px;color:var(--sub)}
+section{background:#fff;margin:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+h2{display:flex;justify-content:space-between;align-items:center;font-size:15px;margin:0;padding:12px 16px;border-left:6px solid var(--c)}
+h2 span{font-weight:400;color:var(--sub);font-size:13px}
+.row{display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid var(--line);cursor:pointer;position:relative}
+.row input{position:absolute;opacity:0}
+.box{width:24px;height:24px;border:2px solid #b7c0bd;border-radius:6px;flex:none;display:grid;place-items:center}
+input:checked+.box{background:var(--g);border-color:var(--g)}
+input:checked+.box::after{content:"";width:6px;height:11px;border:solid #fff;border-width:0 3px 3px 0;transform:rotate(45deg) translate(-1px,-1px)}
+input:focus-visible+.box{outline:3px solid #1a73e8;outline-offset:2px}
+#bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom))}
+.tools{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:8px}
+.tools button{background:none;border:0;color:#0b7a3b;font:inherit;padding:6px 8px;cursor:pointer}
+.primary{width:100%;border:0;border-radius:8px;background:var(--g);color:#fff;font:700 17px/1 inherit;padding:16px;cursor:pointer}
+.primary:disabled{background:#c5cdca;cursor:default}
+#err{color:#c62828;font-size:14px;margin:6px 0 0;min-height:1em}
+.center{text-align:center;padding:64px 24px}
+.center h1{font-size:22px}
+</style>
+</head>
+<body>
+<main id="app"><p class="center note">読み込み中…</p></main>
+<div id="bar" hidden>
+  <div class="tools">
+    <b id="count"></b>
+    <span><button id="all" type="button">全て選ぶ</button><button id="none" type="button">全て解除</button></span>
+  </div>
+  <button id="save" class="primary" type="button" disabled>変更がありません</button>
+  <p id="err" role="alert"></p>
+</div>
+
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+// ▼ ここを書き換える
+const LIFF_ID = 'xxxxxxxxxx-xxxxxxxx';                          // LINE Developers > LIFF の LIFF ID
+const GAS_URL = 'https://script.google.com/macros/s/xxxx/exec'; // GASウェブアプリのURL（/exec）
+// ▲
+
+const $ = s => document.querySelector(s);
+const state = { groups: [], sel: new Set(), base: '' };
+const key = () => [...state.sel].sort().join('|');
+const total = () => state.groups.reduce((n, g) => n + g.items.length, 0);
+
+async function api(action, extra) {
+  // text/plain にすると事前確認(preflight)が不要になり、GASでも通信できる
+  const r = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action, idToken: liff.getIDToken(), ...extra })
+  });
+  const j = await r.json();
+  if (j.error === 'token') { liff.logout(); liff.login(); throw new Error('token'); }
+  if (!j.ok) throw new Error(j.error || 'server');
+  return j;
+}
+
+function render() {
+  const app = $('#app');
+  app.innerHTML = '';
+  const head = document.createElement('header');
+  head.innerHTML = '<h1>配信設定</h1><p>受け取りたい分野をまとめて選び、最後に「保存する」を押してください。</p>';
+  app.appendChild(head);
+
+  state.groups.forEach(g => {
+    const sec = document.createElement('section');
+    const h = document.createElement('h2');
+    h.style.setProperty('--c', g.color);
+    h.innerHTML = '<b></b><span></span>';
+    h.firstChild.textContent = g.title;
+    sec.appendChild(h);
+    g.items.forEach(name => {
+      const lb = document.createElement('label');
+      lb.className = 'row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = state.sel.has(name);
+      cb.addEventListener('change', () => { cb.checked ? state.sel.add(name) : state.sel.delete(name); update(); });
+      const box = document.createElement('span'); box.className = 'box';
+      const tx = document.createElement('span'); tx.textContent = name;
+      lb.append(cb, box, tx);
+      sec.appendChild(lb);
+    });
+    sec._g = g;
+    app.appendChild(sec);
+  });
+  const n = document.createElement('p');
+  n.className = 'note'; n.style.padding = '0 16px';
+  n.textContent = '防災情報などの重要なお知らせは、この設定にかかわらず届きます。';
+  app.appendChild(n);
+  $('#bar').hidden = false;
+  update();
+}
+
+function update() {
+  document.querySelectorAll('section').forEach(sec => {
+    const c = sec._g.items.filter(i => state.sel.has(i)).length;
+    sec.querySelector('h2 span').textContent = c + ' / ' + sec._g.items.length;
+  });
+  $('#count').textContent = '選択中 ' + state.sel.size + ' / ' + total();
+  const dirty = key() !== state.base;
+  const b = $('#save');
+  b.disabled = !dirty;
+  b.textContent = dirty ? '保存する' : '変更がありません';
+}
+
+function setAll(on) {
+  state.groups.forEach(g => g.items.forEach(i => on ? state.sel.add(i) : state.sel.delete(i)));
+  document.querySelectorAll('.row input').forEach(cb => cb.checked = on);
+  update();
+}
+
+async function save() {
+  const b = $('#save');
+  b.disabled = true; b.textContent = '保存中…'; $('#err').textContent = '';
+  try {
+    await api('save', { categories: [...state.sel] });
+    state.base = key();
+    $('#bar').hidden = true;
+    $('#app').innerHTML = '<div class="center"><h1>設定を保存しました</h1><p class="note">' + state.sel.size +
+      ' 分野を受け取る設定になっています。<br>変更したいときは、メニューからもう一度開けます。</p><p><button class="primary" id="close" type="button">閉じる</button></p></div>';
+    $('#close').onclick = () => liff.closeWindow();
+  } catch (e) {
+    update();
+    $('#err').textContent = '保存できませんでした。通信状況を確認して、もう一度お試しください。';
+  }
+}
+
+$('#all').onclick = () => setAll(true);
+$('#none').onclick = () => setAll(false);
+$('#save').onclick = save;
+
+(async () => {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login(); return; }
+    const j = await api('get');
+    state.groups = j.groups;
+    state.sel = new Set(j.selected);
+    state.base = key();
+    render();
+  } catch (e) {
+    if (e.message === 'token') return;
+    $('#app').innerHTML = '<div class="center"><h1>読み込めませんでした</h1><p class="note">通信状況を確認して、もう一度開いてください。</p><p><button class="primary" type="button" onclick="location.reload()">再読み込み</button></p></div>';
+  }
+})();
+</script>
+</body>
+</html>
